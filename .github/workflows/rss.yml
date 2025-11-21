@@ -1,0 +1,40 @@
+name: Update ARERA RSS
+
+on:
+  schedule:
+    # Ogni 2 ore (puoi cambiare)
+    - cron: "0 */2 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Generate RSS
+        run: |
+          python generate_rss.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain docs/feed.xml)" ]; then
+            git add docs/feed.xml
+            git commit -m "Update RSS feed"
+            git push
+          else
+            echo "No changes to commit"
+          fi
