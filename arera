@@ -1,0 +1,108 @@
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+from email.utils import format_datetime
+import html
+
+ARERA_URL = "https://www.arera.it/atti-e-provvedimenti?ADMCMD_prev=LIVE&anno=&numero=&tipologia=Delibera&keyword=&settore=&orderby="
+
+def fetch_delibere(max_items=20):
+    resp = requests.get(ARERA_URL, timeout=20)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    items = []
+
+    # Prendo tutti i link che portano al dettaglio delle delibere
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        # Tutte le delibere hanno un link di questo tipo: /atti-e-provvedimenti/dettaglio/25/501-25
+        if "/atti-e-provvedimenti/dettaglio/" in href:
+            text = " ".join(a.get_text(strip=True).split())
+            if not text.startswith("Delibera"):
+                continue
+
+            # Esempio di testo:
+            # "Delibera 18/11/2025 501/2025/R/idr Titolo molto lungo..."
+            parts = text.split()
+            if len(parts) < 4:
+                continue
+
+            # Estraggo data (seconda parola, tipo 18/11/2025)
+            try:
+                date_str = parts[1]
+                dt = datetime.strptime(date_str, "%d/%m/%Y")
+            except Exception:
+                # Se qualcosa va storto, salto
+                continue
+
+            # Numero (terza parola)
+            numero = parts[2]
+
+            # Titolo = tutto il resto
+            title = " ".join(parts[3:])
+
+            # URL assoluto
+            if href.startswith("http"):
+                link = href
+            else:
+                link = "https://www.arera.it" + href
+
+            items.append({
+                "title": title,
+                "link": link,
+                "guid": link,
+                "pubDate": format_datetime(dt),
+                "description": f"Delibera {numero} del {date_str} – {title}",
+            })
+
+    # Ordino per data decrescente (giusto per sicurezza)
+    items.sort(key=lambda x: x["pubDate"], reverse=True)
+    return items[:max_items]
+
+
+def build_rss(items):
+    channel_title = "ARERA – Delibere"
+    channel_link = ARERA_URL
+    channel_description = "Feed generato automaticamente dalle Delibere ARERA (tipologia: Delibera)."
+
+    rss_items = []
+    for it in items:
+        rss_items.append(f"""
+    <item>
+      <title>{html.escape(it["title"])}</title>
+      <link>{html.escape(it["link"])}</link>
+      <guid>{html.escape(it["guid"])}</guid>
+      <pubDate>{it["pubDate"]}</pubDate>
+      <description>{html.escape(it["description"])}</description>
+    </item>""")
+
+    rss_body = "\n".join(rss_items)
+
+    rss = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>{html.escape(channel_title)}</title>
+    <link>{html.escape(channel_link)}</link>
+    <description>{html.escape(channel_description)}</description>
+    <language>it-it</language>
+{rss_body}
+  </channel>
+</rss>
+"""
+    return rss
+
+
+def main():
+    items = fetch_delibere()
+    rss_xml = build_rss(items)
+
+    # Scrivo il feed nella cartella 'docs' (che useremo per GitHub Pages)
+    import os
+    os.makedirs("docs", exist_ok=True)
+    with open("docs/feed.xml", "w", encoding="utf-8") as f:
+        f.write(rss_xml)
+
+
+if __name__ == "__main__":
+    main()
